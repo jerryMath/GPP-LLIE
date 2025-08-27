@@ -25,6 +25,7 @@ layer normalization (GPP-LN) and utilize local perceptual priors to guide the at
 ![teaser](images/framework.jpg)
 
 ## 📢 News
+**2025-8-27:** The pre-trained weight for LOLv2-syn dataset is provided. 🏃 <br>
 **2025-8-12:** We release the **Generative Perceptual Prior Extraction** pipeline, as well as the generated global and local priors for LOLv2-real and LOLv2-syn datasets. We release our generated global and local priors for LOLv1. Test and Training codes are provided. 🚀 <br>
 **2025-7-22:** Link for pre-trained weight (LOLv1) is released. We release our generated global and local priors for LOLv1. Test and Training codes are provided. ⭐ <br>
 **2025-6-12:** This repo has been updated. The proposed VLM-based generative perceptual priors extraction pipeline has been added. ⭐ <br>
@@ -79,6 +80,13 @@ cd GPP-LLIE
 
 Download [Pre-trained weight for LOLv1 Dataset](https://mcmasteru365-my.sharepoint.com/:u:/g/personal/dongw22_mcmaster_ca/EWTcRm7rQc5Ao3qfLcc98wkBhBByYPnMN7csOPBJREV0TA). 
 
+### 📷 Download Our Generated Global and Local Priors for LOLv2-syn Dataset:
+- Generative Priors for LOLv2-syn [Drive](https://mcmasteru365-my.sharepoint.com/:f:/r/personal/dongw22_mcmaster_ca/Documents/25AAAI-GPP-LLIE/LOLv2-syn_global_local_priors?csf=1&web=1&e=d6Jq4U)
+
+### ⬇ Download Pre-trained Weight for LOLv2-syn
+
+Download [Pre-trained weight for LOLv2-syn Dataset](https://mcmasteru365-my.sharepoint.com/:u:/g/personal/dongw22_mcmaster_ca/EXp1-7vgRrlHpd_gvkhBqBMBRJK33lD-oJG904jo06sF7A?e=irHEKm). 
+
 ### 🚀 Run inference
 - Inference without GT mean adjustment
 
@@ -92,7 +100,7 @@ python test.py
 python test_adjust.py
 ```
 
-Please update the weight path, input_dir in the test code. You can also find save_dir for outputs there. For your convenience, results obtained from our device can be found here: [With GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/EoME8pKrLtdAs9ePRKpY9nIB_eWEcnNlwZZT-wYCVwvWHw?e=hrV22C), [Without GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/EjvlFOE1IBVKsSdq6uXS7eEBnYyfmALci6ZocY60aOpSAw?e=Ekz6eo)
+Please update the weight path, input_dir in the test code. You can also find save_dir for outputs there. For your convenience, results obtained from our device can be found here: [LOLv1 With GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/EoME8pKrLtdAs9ePRKpY9nIB_eWEcnNlwZZT-wYCVwvWHw?e=hrV22C), [LOLv1 Without GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/EjvlFOE1IBVKsSdq6uXS7eEBnYyfmALci6ZocY60aOpSAw?e=Ekz6eo), [LOLv2-syn Without GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/En7W4iIkswFCiBlsvMMnx48B3UL3CuPg8sCb6niSAVqPtg?e=r7w7Dl), [LOLv2-syn With GT](https://mcmasteru365-my.sharepoint.com/:f:/g/personal/dongw22_mcmaster_ca/EvZGDn2KpkdBlcBxYyNkFasBHPkQWAGzp1bcbzqlJU0jlg?e=Bz3mAD).
 
 ## 🏋️ Training
 
