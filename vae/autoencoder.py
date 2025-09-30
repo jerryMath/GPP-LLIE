@@ -1,12 +1,7 @@
 import torch
 import pytorch_lightning as pl
-import torch.nn.functional as F
-from contextlib import contextmanager
-
-
 from vae.encoder_decoder import Encoder, Decoder
 from vae.util_vae import DiagonalGaussianDistribution
-
 
 
 class AutoencoderKL(pl.LightningModule):
@@ -28,18 +23,39 @@ class AutoencoderKL(pl.LightningModule):
         super().__init__()
         self.image_key = image_key
         self.encoder = Encoder(ch=ch, out_ch=out_ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks,
-                 attn_resolutions=attn_resolutions, dropout=dropout, resamp_with_conv=True, in_channels=in_channels,
-                 resolution=resolution, z_channels=z_channels, double_z=double_z)
+                               attn_resolutions=attn_resolutions, dropout=dropout, resamp_with_conv=True,
+                               in_channels=in_channels,
+                               resolution=resolution, z_channels=z_channels, double_z=double_z)
         self.decoder = Decoder(ch=ch, out_ch=out_ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks,
-                 attn_resolutions=attn_resolutions, dropout=dropout, resamp_with_conv=True, in_channels=in_channels,
-                 resolution=resolution, z_channels=z_channels)
+                               attn_resolutions=attn_resolutions, dropout=dropout, resamp_with_conv=True,
+                               in_channels=in_channels,
+                               resolution=resolution, z_channels=z_channels)
+        """
+        double the channels for both mean and log_variance
+        In VQ-VAE (vector quantized VAE), a similar conv is used before discretizing latents
+        (a “quantization” step).In AutoencoderKL, we don’t quantize, but we still call it 
+        quant_conv because it prepares the features for “distributional quantization” 
+        (Gaussian reparam sampling).
+        """
 
-        self.quant_conv = torch.nn.Conv2d(2*z_channels, 2*embed_dim, 1)
+        """
+        1×1 convolution is basically a learned linear projection per pixel across channels.
+        Efficient: only mixes channel dimensions, keeps spatial structure intact.
+        Flexible: can expand or shrink channels as needed.
+        Standard in VAEs: to project encoder features into distribution parameters without losing 
+            spatial resolution.
+        """
+        self.quant_conv = torch.nn.Conv2d(2 * z_channels, 2 * embed_dim, 1)
         self.post_quant_conv = torch.nn.Conv2d(embed_dim, z_channels, 1)
         self.embed_dim = embed_dim
 
     def encode(self, x):
         h = self.encoder(x)
+        # compared with the normal reparmeterization method used in VAE,
+        # here, we
+        # 1. Use a single conv (quant_conv) → outputs 2× channels.
+        # 2. Split into μ and logσ²
+        # this is simpler and GPU-efficient compared to running two separate conv layers.
         moments = self.quant_conv(h)
         posterior = DiagonalGaussianDistribution(moments)
         return posterior.sample()
@@ -51,6 +67,10 @@ class AutoencoderKL(pl.LightningModule):
 
     def forward(self, input, sample_posterior=True):
         posterior = self.encode(input)
+        """
+        sample() = μ + σ ⊙ ε (adds stochasticity).
+        mode() = deterministic (just μ).
+        """
         if sample_posterior:
             z = posterior.sample()
         else:
@@ -58,39 +78,45 @@ class AutoencoderKL(pl.LightningModule):
         dec = self.decode(z)
         return dec
 
-
     def training_step(self, batch, batch_idx, optimizer_idx):
         inputs = self.get_input(batch, self.image_key)
         reconstructions, posterior = self(inputs)
 
         if optimizer_idx == 0:
-            # train encoder+decoder+logvar
-            aeloss, log_dict_ae = self.loss(inputs, reconstructions, posterior, optimizer_idx, self.global_step,
-                                            last_layer=self.get_last_layer(), split="train")
-            self.log("aeloss", aeloss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
-            self.log_dict(log_dict_ae, prog_bar=False, logger=True, on_step=True, on_epoch=False)
+            # train encoder + decoder + logvar
+            aeloss, log_dict_ae = self.loss(inputs, reconstructions, posterior, optimizer_idx,
+                                            self.global_step, last_layer=self.get_last_layer(),
+                                            split="train")
+            self.log("aeloss", aeloss,
+                     prog_bar=True, logger=True, on_step=True, on_epoch=True)
+            self.log_dict(log_dict_ae,
+                          prog_bar=False, logger=True, on_step=True, on_epoch=False)
             return aeloss
 
-        if optimizer_idx == 1:
+        elif optimizer_idx == 1:
             # train the discriminator
-            discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, optimizer_idx, self.global_step,
-                                                last_layer=self.get_last_layer(), split="train")
+            discloss, log_dict_disc = self.loss(inputs, reconstructions, posterior, optimizer_idx,
+                                                self.global_step, last_layer=self.get_last_layer(),
+                                                split="train")
 
-            self.log("discloss", discloss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
-            self.log_dict(log_dict_disc, prog_bar=False, logger=True, on_step=True, on_epoch=False)
+            self.log("discloss", discloss,
+                     prog_bar=True, logger=True, on_step=True, on_epoch=True)
+            self.log_dict(log_dict_disc,
+                          prog_bar=False, logger=True, on_step=True, on_epoch=False)
             return discloss
+
+        else:
+            raise ValueError(f"Unexpected value: {optimizer_idx}, ONLY 0 or 1")
 
     def get_last_layer(self):
         return self.decoder.conv_out.weight
-    
 
     def configure_optimizers(self, lr):
         lr = lr
-        opt_ae = torch.optim.Adam(list(self.encoder.parameters())+
-                                  list(self.decoder.parameters())+
-                                  list(self.quant_conv.parameters())+
+        opt_ae = torch.optim.Adam(list(self.encoder.parameters()) +
+                                  list(self.decoder.parameters()) +
+                                  list(self.quant_conv.parameters()) +
                                   list(self.post_quant_conv.parameters()),
                                   lr=lr, betas=(0.5, 0.9))
-        
-        return opt_ae
 
+        return opt_ae

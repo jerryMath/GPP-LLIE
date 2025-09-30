@@ -5,22 +5,13 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn.parallel import DataParallel
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
-from torchvision.datasets import ImageFolder
-from torchvision import transforms
 import numpy as np
 from collections import OrderedDict
 from PIL import Image
-from copy import deepcopy
-from glob import glob
 from time import time
 import argparse
 import logging
 import os
-import math
 from model_incontext_revise import DiT_incontext_revise
 from diffusion import create_diffusion
 from vae.autoencoder import AutoencoderKL
@@ -29,9 +20,6 @@ import options.options as option
 from LoL_dataset import LoL_Dataset_RIDCP, create_dataloader
 from utils import util
 from torchvision.utils import save_image
-from download import load_model
-
-from torch.nn import functional as F
 
 
 @torch.no_grad()
@@ -43,7 +31,8 @@ def update_ema(ema_model, model, decay=0.9999):
     model_params = OrderedDict(model.named_parameters())
 
     for name, param in model_params.items():
-        # TODO: Consider applying only to params that require_grad to avoid small numerical changes of pos_embed
+        # TODO: Consider applying only to params that require_grad to avoid small numerical
+        #  changes of pos_embed
         ema_params[name].mul_(decay).add_(param.data, alpha=1 - decay)
 
 
@@ -110,9 +99,11 @@ def main(args):
                         and 'pretrain_model' not in key and 'resume' not in key))
 
         # config loggers. Before it, the log will not work
-        util.setup_logger('base', opt['path']['log'], 'train_' + opt['name'], level=logging.INFO,
+        util.setup_logger('base', opt['path']['log'], 'train_' + opt['name'],
+                          level=logging.INFO,
                           screen=True, tofile=True)
-        util.setup_logger('val', opt['path']['log'], 'val_' + opt['name'], level=logging.INFO,
+        util.setup_logger('val', opt['path']['log'], 'val_' + opt['name'],
+                          level=logging.INFO,
                           screen=True, tofile=True)
         logger = logging.getLogger('base')
         logger.info(option.dict2str(opt))
@@ -135,9 +126,12 @@ def main(args):
 
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
     parmas = list(model.parameters()) +  list(cond_lq.parameters())
-    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper)
+    # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning
+    # rate of 1e-4 in our paper)
     optimizer = torch.optim.AdamW(parmas, lr=1e-4, weight_decay=0)
-    scheduler_G = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[2500, 3500, 4000, 4500, 4800], gamma=0.5)
+    scheduler_G = torch.optim.lr_scheduler.MultiStepLR(optimizer,
+                                                       milestones=[2500, 3500, 4000, 4500, 4800],
+                                                       gamma=0.5)
     
     dataset_cls = LoL_Dataset_RIDCP
 
@@ -197,7 +191,8 @@ def main(args):
                 steps_per_sec = log_steps / (end_time - start_time)
                 # Reduce loss history over all processes:
                 avg_loss = torch.tensor(running_loss / log_steps, device='cuda')
-                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, "
+                            f"Train Steps/Sec: {steps_per_sec:.2f}")
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -231,11 +226,14 @@ def main(args):
 
                 # Sample images:
                 samples = diffusion_val.p_sample_loop(
-                    model.forward, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+                    model.forward, z.shape, z, clip_denoised=False,
+                    model_kwargs=model_kwargs, progress=True, device=device
                     )
                 with torch.no_grad():
                     samples = vae.decode(samples)
-                samples = samples[:, :, padding_params[0]:samples.shape[2] - padding_params[1],padding_params[2]:samples.shape[3] - padding_params[3]]
+                samples = samples[:, :,
+                padding_params[0]:samples.shape[2] - padding_params[1],
+                padding_params[2]:samples.shape[3] - padding_params[3]]
                 
                 assert samples.shape == x.shape                     
                 save_img_path = os.path.join(img_dir, os.path.basename(data['GT_path'][0]+'.png'))                   
@@ -268,7 +266,8 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
+    # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper
+    # (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument('--opt', type=str, help='Path to option YMAL file.',
                             default='LOLv1_dit.yml')
@@ -276,7 +275,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=5000)
     parser.add_argument("--global-batch-size", type=int, default=16)
     parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
+    # Choice doesn't affect training
+    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--log-every", type=int, default=10)
     parser.add_argument("--val-every", type=int, default=5000)
     parser.add_argument("--ckpt-every", type=int, default=5000)

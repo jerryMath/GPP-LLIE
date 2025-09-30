@@ -76,6 +76,19 @@ def _warmup_beta(beta_start, beta_end, num_diffusion_timesteps, warmup_frac):
     return betas
 
 
+# Diffusion needs a schedule of noise levels. Betas define how much noise is added at each step.
+# noise scheduler
+"""
+"linear": linearly increase noise.
+
+"quad": quadratic schedule.
+
+"warmup": start slow, then increase.
+
+"jsd": inverse steps.
+
+👉 Most common = "linear" or "cosine".
+"""
 def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_timesteps):
     """
     This is the deprecated API for creating beta schedules.
@@ -108,7 +121,13 @@ def get_beta_schedule(beta_schedule, *, beta_start, beta_end, num_diffusion_time
     assert betas.shape == (num_diffusion_timesteps,)
     return betas
 
+"""
+redefined schedules:
 
+"linear": DDPM style.
+
+"squaredcos_cap_v2": cosine schedule (used in improved diffusion, Stable Diffusion).
+"""
 def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
     """
     Get a pre-defined beta schedule for the given name.
@@ -167,7 +186,7 @@ class GaussianDiffusion:
     def __init__(
         self,
         *,
-        betas,
+        betas, # noise schedule
         model_mean_type,
         model_var_type,
         loss_type
@@ -185,20 +204,21 @@ class GaussianDiffusion:
 
         self.num_timesteps = int(betas.shape[0])
 
-        alphas = 1.0 - betas
-        self.alphas_cumprod = np.cumprod(alphas, axis=0)
+        alphas = 1.0 - betas # remaining clean signal at each step
+        self.alphas_cumprod = np.cumprod(alphas, axis=0) # product over time (how much signal survives)
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
         assert self.alphas_cumprod_prev.shape == (self.num_timesteps,)
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
-        self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
-        self.sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - self.alphas_cumprod)
+        self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod) # scaling factor for signal
+        self.sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - self.alphas_cumprod) # scaling factor for noise
         self.log_one_minus_alphas_cumprod = np.log(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod)
         self.sqrt_recipm1_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod - 1)
 
         # calculations for posterior q(x_{t-1} | x_t, x_0)
+        # used in reverse process
         self.posterior_variance = (
             betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
         )
@@ -265,6 +285,13 @@ class GaussianDiffusion:
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
+    """
+    * Calls the denoising model (Transformer / U-Net).
+    * Gets predicted noise or clean image.
+    * Computes the mean/variance for p(x_t-1 | x_t)
+    
+    This is where the neural network is trained to reverse the process.
+    """
     def p_mean_variance(self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of

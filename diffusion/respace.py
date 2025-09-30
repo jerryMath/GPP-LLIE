@@ -62,6 +62,7 @@ def space_timesteps(num_timesteps, section_counts):
     return set(all_steps)
 
 
+# Skip timesteps
 class SpacedDiffusion(GaussianDiffusion):
     """
     A diffusion process which can skip steps in a base diffusion process.
