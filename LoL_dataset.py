@@ -397,7 +397,7 @@ class LoL_Dataset_RIDCP(data.Dataset):
             hr = self.to_tensor(hr)
             lr = self.to_tensor(lr)
 
-            return {'LQ': lr, 'GT': hr,  'GT_path': f_name, 'padding_params': padding_params, 'global':vis, 'local': quality_map.squeeze(0)}
+            return {'LQ': lr, 'GT': hr, 'GT_path': f_name, 'padding_params': padding_params, 'global':vis, 'local': quality_map.squeeze(0)}
         
 
 

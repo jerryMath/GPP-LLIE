@@ -83,6 +83,7 @@ def main(args):
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
     opt = option.parse(args.opt, is_train=True)
+    print(f"=== opt: {opt}")
     #### distributed training settings
     opt['dist'] = False
     rank = -1
@@ -93,18 +94,14 @@ def main(args):
     #### mkdir and loggers
     if rank <= 0:  # normal training (rank -1) OR distributed training (rank 0)
     
-        util.mkdir_and_rename(
-            opt['path']['experiments_root'])  # rename experiment folder if exists
+        util.mkdir_and_rename(opt['path']['experiments_root'])  # rename experiment folder if exists
         util.mkdirs((path for key, path in opt['path'].items() if not key == 'experiments_root'
                         and 'pretrain_model' not in key and 'resume' not in key))
-
         # config loggers. Before it, the log will not work
         util.setup_logger('base', opt['path']['log'], 'train_' + opt['name'],
-                          level=logging.INFO,
-                          screen=True, tofile=True)
+                          level=logging.INFO, screen=True, tofile=True)
         util.setup_logger('val', opt['path']['log'], 'val_' + opt['name'],
-                          level=logging.INFO,
-                          screen=True, tofile=True)
+                          level=logging.INFO, screen=True, tofile=True)
         logger = logging.getLogger('base')
         logger.info(option.dict2str(opt))
 
@@ -115,24 +112,25 @@ def main(args):
     diffusion = create_diffusion(timestep_respacing="") # default: 1000 steps, linear noise schedule
     vae = AutoencoderKL()
     try:
-        vae.load_state_dict(torch.load('weight_lol.pth')['vae'], strict=True)
+        vae.load_state_dict(torch.load('./weight_lolv1.pth')['vae'], strict=True)
         print('loading pretrained vae')
-    except:
-        print('error')
+    except Exception as e:
+        print('loading pretrained vae failed:', e)
+        raise
     vae = vae.to(device)
 
     cond_lq = CondEncoder()
     cond_lq = cond_lq.to(device)
 
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
-    parmas = list(model.parameters()) +  list(cond_lq.parameters())
+    # learnable params includes DiT + CondEncoder
+    params = list(model.parameters()) +  list(cond_lq.parameters())
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning
     # rate of 1e-4 in our paper)
-    optimizer = torch.optim.AdamW(parmas, lr=1e-4, weight_decay=0)
+    optimizer = torch.optim.AdamW(params, lr=1e-4, weight_decay=0)
     scheduler_G = torch.optim.lr_scheduler.MultiStepLR(optimizer,
                                                        milestones=[2500, 3500, 4000, 4500, 4800],
                                                        gamma=0.5)
-    
     dataset_cls = LoL_Dataset_RIDCP
 
     for phase, dataset_opt in opt['datasets'].items():
@@ -172,8 +170,14 @@ def main(args):
             
             t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
             model_kwargs = dict(y=y, vis=global_prior, q_map=local_prior)
-            
+
+            """
+            loss_dict: {'vb': tensor([0.0160], device='cuda:0', grad_fn=<WhereBackward0>), 
+                        'mse': tensor([1.3777], device='cuda:0', grad_fn=<MeanBackward1>), 
+                        'loss': tensor([1.3937], device='cuda:0', grad_fn=<AddBackward0>)}
+            """
             loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
+            print(f"=== loss_dict: {loss_dict}")
             loss = loss_dict["loss"].mean()
             optimizer.zero_grad()
             loss.backward()
@@ -269,10 +273,9 @@ if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper
     # (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument('--opt', type=str, help='Path to option YMAL file.',
-                            default='LOLv1_dit.yml')
+    parser.add_argument('--opt', type=str, help='Path to option YMAL file.', default='LOLv1_dit.yml')
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--epochs", type=int, default=5000)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--global-batch-size", type=int, default=16)
     parser.add_argument("--global-seed", type=int, default=0)
     # Choice doesn't affect training
