@@ -105,7 +105,6 @@ def main(args):
         logger = logging.getLogger('base')
         logger.info(option.dict2str(opt))
 
-    
     model = DiT_incontext_revise()
     model = model.to(device)
 

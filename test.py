@@ -43,7 +43,7 @@ def main(inp_dir):
     os.makedirs(lr_dir, exist_ok=True)
     global_prior_dir = os.path.join(inp_dir, 'global_score')
     os.makedirs(global_prior_dir, exist_ok=True)
-    local_prior_dir = os.path.join(inp_dir, 'local_prior')
+    local_prior_dir = os.path.join(inp_dir, 'local_hist_prior')
     os.makedirs(local_prior_dir, exist_ok=True)
     out_dir = os.path.join(inp_dir, 'outputs')
     os.makedirs(out_dir, exist_ok=True)

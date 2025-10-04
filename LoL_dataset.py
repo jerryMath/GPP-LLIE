@@ -311,17 +311,18 @@ class LoL_Dataset_RIDCP(data.Dataset):
         
         self.to_tensor = ToTensor()
 
-        
 
     def __len__(self):
         return len(self.pairs)
 
-    def load_pairs(self, folder_path):
+
+    @staticmethod
+    def load_pairs(folder_path):
         cv2.setNumThreads(0)
         cv2.ocl.setUseOpenCL(False)
         low_list = os.listdir(os.path.join(folder_path, 'low'))
         vis_list = os.listdir(os.path.join(folder_path, 'global_score'))
-        quality_map_list = os.listdir(os.path.join(folder_path, 'local_prior'))
+        quality_map_list = os.listdir(os.path.join(folder_path, 'local_hist_prior'))
         print(len(vis_list))
 
         pairs = []
@@ -330,18 +331,19 @@ class LoL_Dataset_RIDCP(data.Dataset):
                 [cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'low', f_name[0])), cv2.COLOR_BGR2RGB),
                  cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'high', f_name[0])), cv2.COLOR_BGR2RGB),
                  f_name[0].split('.')[0],
-                 torch.load(os.path.join(folder_path, 'local_prior', f_name[2]), map_location='cpu'),#cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'local_prior', f_name[2])), cv2.COLOR_BGR2RGB),
+                 torch.load(os.path.join(folder_path, 'local_hist_prior', f_name[2]), map_location='cpu'),#cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'local_prior', f_name[2])), cv2.COLOR_BGR2RGB),
                  torch.load(os.path.join(folder_path, 'global_score', f_name[1]),  map_location='cpu')])
         return pairs
-    
 
-    def load_pairs_val(self, folder_path):
+
+    @staticmethod
+    def load_pairs_val(folder_path):
         cv2.setNumThreads(0)
         cv2.ocl.setUseOpenCL(False)
         low_list = os.listdir(os.path.join(folder_path, 'low'))
         print(len(low_list))
         vis_list = os.listdir(os.path.join(folder_path, 'global_score'))
-        quality_map_list = os.listdir(os.path.join(folder_path, 'local_prior'))
+        quality_map_list = os.listdir(os.path.join(folder_path, 'local_hist_prior'))
         pairs = []
         for idx, f_name in enumerate(zip(low_list, vis_list, quality_map_list)):
             lr, padding_params = auto_padding(cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'low', f_name[0])), cv2.COLOR_BGR2RGB))
@@ -349,9 +351,8 @@ class LoL_Dataset_RIDCP(data.Dataset):
         
             pairs.append(
                 [lr,
-                 cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'high', f_name[0])), cv2.COLOR_BGR2RGB),
-                 f_name[0].split('.')[0],
-                 torch.load(os.path.join(folder_path, 'local_prior', f_name[2]), map_location='cpu'),
+                 cv2.cvtColor(cv2.imread(os.path.join(folder_path, 'high', f_name[0])), cv2.COLOR_BGR2RGB), f_name[0].split('.')[0],
+                 torch.load(os.path.join(folder_path, 'local_hist_prior', f_name[2]), map_location='cpu'),
                  torch.load(os.path.join(folder_path, 'global_score', f_name[1]), map_location='cpu'),
                  padding_params])
         return pairs
@@ -365,9 +366,7 @@ class LoL_Dataset_RIDCP(data.Dataset):
             input_lq_size = np.min(lr.shape[:2])
             scale = input_gt_size // input_lq_size
 
-            
             if self.opt['use_resize_crop']:
-                
                 # random resize
                 input_gt_random_size = random.randint(self.crop_size, input_gt_size)
                 input_gt_random_size = input_gt_random_size - input_gt_random_size % scale
@@ -375,13 +374,11 @@ class LoL_Dataset_RIDCP(data.Dataset):
 
                 hr = random_resize(hr, resize_factor)
                 lr= random_resize(lr, resize_factor)
-                
 
                 quality_map = rgb(quality_map)
 
                 quality_map = random_resize(quality_map, resize_factor)
 
-                
                 hr, lr, quality_map = paired_random_crop(hr, lr, quality_map, self.crop_size, input_gt_size // input_lq_size)
             
             hr = self.to_tensor(hr)
@@ -466,7 +463,6 @@ def center_crop_tensor(img, size):
     assert border_double % 2 == 0, (img.shape, size)
     border = border_double // 2
     return img[:, :, border:-border, border:-border]
-
 
 
 

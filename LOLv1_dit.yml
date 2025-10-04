@@ -34,7 +34,6 @@ path:
   resume_state: ~
 
 
-
 path:
   # pretrain_model_G: ../pretrained_models/RRDB_DF2K_8X.pth
   strict_load: true
