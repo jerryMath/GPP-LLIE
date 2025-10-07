@@ -4,6 +4,7 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.pyc
 *.pyd
 *.so
 *.egg
@@ -82,8 +83,13 @@ Thumbs.db
 *.old
 *.orig
 
+# CUDA and system installers
+*.deb
+*.run
+
 # -------------------------
 # Custom project-specific
 # -------------------------
 dataset/
 experiments/
+defor_cuda_ext/
