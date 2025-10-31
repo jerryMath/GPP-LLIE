@@ -271,7 +271,8 @@ def main(args):
 
                     # Sample images:
                     samples = diffusion_val.p_sample_loop(
-                        model.forward, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+                        model.forward, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs,
+                        progress=True, device=device
                         )
 
                     dec_feat = vae.decode(samples, mid_feat=True)
