@@ -146,7 +146,7 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
             beta_end=scale * 0.02,
             num_diffusion_timesteps=num_diffusion_timesteps,
         )
-    elif schedule_name == "squaredcos_cap_v2":
+    elif schedule_name == "squaredcos_cap_v2": # cosine
         return betas_for_alpha_bar(
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
@@ -205,6 +205,7 @@ class GaussianDiffusion:
         self.num_timesteps = int(betas.shape[0])
 
         alphas = 1.0 - betas # remaining clean signal at each step
+        # alpha_t_bar, alpha_t-1_bar, alpha_t+1_bar
         self.alphas_cumprod = np.cumprod(alphas, axis=0) # product over time (how much signal survives)
         self.alphas_cumprod_prev = np.append(1.0, self.alphas_cumprod[:-1])
         self.alphas_cumprod_next = np.append(self.alphas_cumprod[1:], 0.0)
@@ -234,8 +235,12 @@ class GaussianDiffusion:
             (1.0 - self.alphas_cumprod_prev) * np.sqrt(alphas) / (1.0 - self.alphas_cumprod)
         )
 
+    """
+    q is the forward process, which add noise to an img
+    """
     def q_mean_variance(self, x_start, t):
         """
+        IDDPM, eq. (8)
         Get the distribution q(x_t | x_0).
         :param x_start: the [N x C x ...] tensor of noiseless inputs.
         :param t: the number of diffusion steps (minus 1). Here, 0 means one step.
@@ -246,6 +251,8 @@ class GaussianDiffusion:
         log_variance = _extract_into_tensor(self.log_one_minus_alphas_cumprod, t, x_start.shape)
         return mean, variance, log_variance
 
+    # sample from q(x_t | x_0), which is reparameterization for IDDPM, eq. (8)
+    # reparameterization needs a noise
     def q_sample(self, x_start, t, noise=None):
         """
         Diffuse the data for a given number of diffusion steps.
@@ -263,6 +270,7 @@ class GaussianDiffusion:
             + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    # IDDPM, eq. (9, 10, 11)
     def q_posterior_mean_variance(self, x_start, x_t, t):
         """
         Compute the mean and variance of the diffusion posterior:
@@ -304,6 +312,7 @@ class GaussianDiffusion:
         :param denoised_fn: if not None, a function which applies to the
             x_start prediction before it is used to sample. Applies before
             clip_denoised.
+            clip_denoised.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
         :return: a dict with the following keys:
@@ -317,13 +326,16 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
+        # print(f"=== x in p_mean_variance: {x.shape}")
         model_output = model(x, t, **model_kwargs)
         if isinstance(model_output, tuple):
             model_output, extra = model_output
         else:
             extra = None
 
+        # var of learned range: IDDPM, eq. (14)
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
+            # the following part only refers to learned_range
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
             min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)
@@ -333,13 +345,16 @@ class GaussianDiffusion:
             model_log_variance = frac * max_log + (1 - frac) * min_log
             model_variance = th.exp(model_log_variance)
         else:
+            # variance is fixed, not learned
             model_variance, model_log_variance = {
                 # for fixedlarge, we set the initial (log-)variance like so
                 # to get a better decoder log likelihood.
+                # beta_t
                 ModelVarType.FIXED_LARGE: (
                     np.append(self.posterior_variance[1], self.betas[1:]),
                     np.log(np.append(self.posterior_variance[1], self.betas[1:])),
                 ),
+                # beta_t_tilda
                 ModelVarType.FIXED_SMALL: (
                     self.posterior_variance,
                     self.posterior_log_variance_clipped,
@@ -373,6 +388,9 @@ class GaussianDiffusion:
         }
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
+        """
+        from x_t and noise eps to x_0, IDDPM, eq. (12)
+        """
         assert x_t.shape == eps.shape
         return (
             _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t
@@ -380,6 +398,9 @@ class GaussianDiffusion:
         )
 
     def _predict_eps_from_xstart(self, x_t, t, pred_xstart):
+        """
+        from x_t and the predicted x_0 to eps
+        """
         return (
             _extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - pred_xstart
         ) / _extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
@@ -425,6 +446,8 @@ class GaussianDiffusion:
         model_kwargs=None,
     ):
         """
+        from x_t to x_t-1
+
         Sample x_{t-1} from the model at the given timestep.
         :param model: the model to sample from.
         :param x: the current tensor at x_{t-1}.
@@ -501,11 +524,6 @@ class GaussianDiffusion:
             progress=progress,
         ):
             final = sample
-            #["sample"]
-            # uncomment the following to visualize the reverse diffusion process
-            # i = i+1
-            # path = os.path.join('sampling_process', str(i)+'.png')
-            # imwrite(path, rgb(final["sample"]))
         return final["sample"]
 
     def p_sample_loop_progressive(
@@ -534,6 +552,8 @@ class GaussianDiffusion:
             img = noise
         else:
             img = th.randn(*shape, device=device)
+
+        # from T to 1
         indices = list(range(self.num_timesteps))[::-1]  #[100, 99, 98, ..., 2, 1]
 
         if progress:
@@ -569,7 +589,7 @@ class GaussianDiffusion:
         eta=0.0,
     ):
         """
-        Sample x_{t-1} from the model using DDIM.
+        Sample x_{t-1} from the model using DDIM. Eq. (12)
         Same usage as p_sample().
         """
         out = self.p_mean_variance(
@@ -586,9 +606,9 @@ class GaussianDiffusion:
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
         eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
-
         alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
         alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
+        # eta = 0 is DDIM, eta = 1 is DDPM. DDIM Eq. (16)
         sigma = (
             eta
             * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
@@ -602,7 +622,8 @@ class GaussianDiffusion:
         )
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
-        )  # no noise when t == 0
+        )  # no noise when t == 0, t is from T to 0, so t = 0 is
+           # the final step and we dont need noise
         sample = mean_pred + nonzero_mask * sigma * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
@@ -730,6 +751,8 @@ class GaussianDiffusion:
             self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):
         """
+        IDDPM, eq. (4-7)
+        Cal the loss, vb is variational bound,bpd is "bit per dim"
         Get a term for the variational lower-bound.
         The resulting units are bits (rather than nats, as one might expect).
         This allows for comparison to other papers.
@@ -737,17 +760,24 @@ class GaussianDiffusion:
                  - 'output': a shape [N] tensor of NLLs or KLs.
                  - 'pred_xstart': the x_0 predictions.
         """
+        # use true x[0], x[t] and t to cal mean and var of x[t-1]
         true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(
             x_start=x_start, x_t=x_t, t=t
         )
+
+        # use x[t],t and predicted x[0] to get mean and var of x[t-1]
         out = self.p_mean_variance(
             model, x_t, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
         )
+
+        # KL between p+theta and q
+        # L[t-1]
         kl = normal_kl(
             true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
         )
         kl = mean_flat(kl) / np.log(2.0)
 
+        # L[0]，discrete Gaussian dist, t = 0
         decoder_nll = -discretized_gaussian_log_likelihood(
             x_start, means=out["mean"], log_scales=0.5 * out["log_variance"]
         )
@@ -789,7 +819,7 @@ class GaussianDiffusion:
                 model_kwargs=model_kwargs,
             )["output"]
             if self.loss_type == LossType.RESCALED_KL:
-                terms["loss"] *= self.num_timesteps
+                terms["loss"] *= self.num_timesteps # weighted KL via IDDPM
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
             model_output = model(x_t, t, **model_kwargs)
 
@@ -851,6 +881,7 @@ class GaussianDiffusion:
 
     def calc_bpd_loop(self, model, x_start, clip_denoised=True, model_kwargs=None):
         """
+        Not used on training, only for evaluation
         Compute the entire variational lower-bound, measured in bits-per-dim,
         as well as other related quantities.
         :param model: the model to evaluate loss on.
@@ -904,7 +935,7 @@ class GaussianDiffusion:
             "mse": mse,
         }
 
-
+# get the tensor at time t
 def _extract_into_tensor(arr, timesteps, broadcast_shape):
     """
     Extract values from a 1-D numpy array for a batch of indices.
@@ -917,4 +948,4 @@ def _extract_into_tensor(arr, timesteps, broadcast_shape):
     res = th.from_numpy(arr).to(device=timesteps.device)[timesteps].float()
     while len(res.shape) < len(broadcast_shape):
         res = res[..., None]
-    return res + th.zeros(broadcast_shape, device=timesteps.device)
+    return res + th.zeros(broadcast_shape, device=timesteps.device) # broadcast by '+'

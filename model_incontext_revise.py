@@ -340,21 +340,31 @@ class TransformerBlock(nn.Module):
         self.cross_attn = Cross_attention(dim * 2, num_heads, bias)
 
     def forward(self, x, y, q_map, t):
-        q_map = self.map_norm(self.map_conv(q_map))
+        # print(f"=== q_map raw: {q_map.shape}")
+        q_map = self.map_conv(q_map)
+        # print(f"=== q_map conv: {q_map.shape}")
+        q_map = self.map_norm(q_map)
+        # print(f"=== q_map norm: {q_map.shape}")
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
         dim = x.shape[1]
+        # print(f"=== x 1: {x.shape}")
+        # print(f"=== y 1: {y.shape}")
         x = torch.cat([x, y], 1)
+        # print(f"=== x 2: {x.shape}")
         x_ = self.swarp(x)
 
         x_ = modulate(self.norm1(x_), shift_msa, scale_msa)
         x = x + gate_msa.unsqueeze(-1).unsqueeze(-1) * self.attn(x_)
+        # print(f"=== x 3: {x.shape}")
 
         # 做cross_attention
         x = x + self.cross_attn(self.cross_norm(x), q_map)
+        # print(f"=== x 4: {x.shape}")
 
         x = x + gate_mlp.unsqueeze(-1).unsqueeze(-1) * self.ffn(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        # print(f"=== x 5: {x.shape}")
         x = x[:, :dim, :, :]
-
+        # print(f"=== x final: {x.shape}")
         return x
 
 
@@ -425,7 +435,9 @@ class DiT_incontext_revise(nn.Module):
         t: (N,) tensor of diffusion timesteps
         """
         B, _, h, w = x.shape
+        # print(f"===x raw: {x.shape}")
         x = self.x_embedder(x)
+        # print(f"===x embedded: {x.shape}")
         y = self.y_embedder(y)
         t = self.t_embedder(t)
         t = t + torch.unsqueeze(vis, dim=-1).to(torch.float32)

@@ -17,6 +17,10 @@ def create_diffusion(
     rescale_learned_sigmas=False,
     diffusion_steps=1000
 ):
+    """
+    Framework for creating diffusion models.
+    """
+    # scheduler for adding noise
     betas = gd.get_named_beta_schedule(noise_schedule, diffusion_steps)
     if use_kl:
         loss_type = gd.LossType.RESCALED_KL

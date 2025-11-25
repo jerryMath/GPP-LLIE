@@ -53,39 +53,39 @@ def main(inp_dir):
     local_prior_paths = fiFindByWildcard(os.path.join(local_prior_dir, '*.pt'))
 
     device = torch.device('cuda:0')
-    state_dict_combo = torch.load('weight_lolv1.pth')
+    state_dict = torch.load('weight_lolv1.pth')
 
     # Transformer based on diffusions
     # diffusion Transformer backbone, with GPP-LN and LPP-Attn inside
     model = DiT_incontext_revise()
-    # model.load_state_dict(state_dict['dit'], strict=True)
-    ckpt_dit = './experiments/GPP_LLIE_LOLv1_dit/models/1/1.pth'  # self trained
-    state_dict = load_model(ckpt_dit)
-    model.load_state_dict(state_dict, strict=True)
+    model.load_state_dict(state_dict['dit'], strict=True)
+    # ckpt_dit = './experiments/GPP_LLIE_LOLv1_dit/models/1/1.pth'  # self trained
+    # state_dict = load_model(ckpt_dit)
+    # model.load_state_dict(state_dict, strict=True)
     model = model.to(device)
 
     # Variational Auto-encoder
     # KL: KL divergence
     vae = AutoencoderKL()
-    vae.load_state_dict(state_dict_combo['vae'], strict=True)
+    vae.load_state_dict(state_dict['vae'], strict=True)
     vae = vae.to(device)
 
     # Conditional Encoder
     # encodes the input + priors into conditioning tokens
     cond_lq = CondEncoder()
-    # cond_lq.load_state_dict(state_dict['cond'], strict=True)
-    ckpt_condencoder = './experiments/GPP_LLIE_LOLv1_dit/models/1/1_condencoder.pth'  # self trained
-    state_dict = load_model(ckpt_condencoder)
-    cond_lq.load_state_dict(state_dict, strict=True)
+    cond_lq.load_state_dict(state_dict['cond'], strict=True)
+    # ckpt_condencoder = './experiments/GPP_LLIE_LOLv1_dit/models/1/1_condencoder.pth'  # self trained
+    # state_dict = load_model(ckpt_condencoder)
+    # cond_lq.load_state_dict(state_dict, strict=True)
     cond_lq = cond_lq.to(device)
 
     # Decoder2
     # second-stage refinement decoder
     second_decoder = Decoder2()
-    # second_decoder.load_state_dict(state_dict['second_decoder'], strict=True)
-    ckpt_second_decoder = './experiments/GPP_LLIE_LOLv1_decoder2/models/1/1_seconddecoder.pth'  # self trained
-    state_dict = load_model(ckpt_second_decoder)
-    second_decoder.load_state_dict(state_dict, strict=True)
+    second_decoder.load_state_dict(state_dict['second_decoder'], strict=True)
+    # ckpt_second_decoder = './experiments/GPP_LLIE_LOLv1_decoder2/models/1/1_seconddecoder.pth'  # self trained
+    # state_dict = load_model(ckpt_second_decoder)
+    # second_decoder.load_state_dict(state_dict, strict=True)
     second_decoder = second_decoder.to(device)
 
     model.eval()
@@ -102,6 +102,7 @@ def main(inp_dir):
         # print(y.shape)
         global_prior = torch.load(global_path, map_location="cuda:0").to(device)
         local_prior = torch.load(local_path, map_location="cuda:0").to(device)
+        print(f"=== local_prior: {local_prior.shape}")
 
         b, c, h, w = img.shape
         # use less memo and run faster without calculating gradients
@@ -110,6 +111,7 @@ def main(inp_dir):
             latent_size_h = h // 4
             latent_size_w = w // 4
             z = torch.randn(1, 3, latent_size_h, latent_size_w, device=device)
+            print(f"=== z: {z.shape}")
             model_kwargs = dict(y=y, vis=global_prior, q_map=local_prior)
 
             # Sample images:
