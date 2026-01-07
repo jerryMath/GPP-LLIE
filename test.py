@@ -1,9 +1,11 @@
 import torch
-
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-import glob
+from torch.amp import autocast # Use torch.cuda.amp.autocast for older pytorch
+import torch.nn.functional as F
 import os
+# os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:64"  # helps fragmentation
+# torch.backends.cuda.matmul.allow_tf32 = True
+# torch.backends.cudnn.allow_tf32 = True
+import glob
 from model_incontext_revise import DiT_incontext_revise
 from diffusion import create_diffusion
 from vae.autoencoder import AutoencoderKL
@@ -14,7 +16,6 @@ import natsort
 from torchvision.transforms import ToTensor
 import cv2
 import numpy as np
-from download import load_model
 
 
 def fiFindByWildcard(wildcard):
@@ -43,17 +44,17 @@ def main(inp_dir):
     os.makedirs(lr_dir, exist_ok=True)
     global_prior_dir = os.path.join(inp_dir, 'global_score')
     os.makedirs(global_prior_dir, exist_ok=True)
-    local_prior_dir = os.path.join(inp_dir, 'local_hist_prior')
+    local_prior_dir = os.path.join(inp_dir, 'local_prior')
     os.makedirs(local_prior_dir, exist_ok=True)
     out_dir = os.path.join(inp_dir, 'outputs')
     os.makedirs(out_dir, exist_ok=True)
 
-    lr_paths = fiFindByWildcard(os.path.join(lr_dir, '*.png'))
+    lr_paths = fiFindByWildcard(os.path.join(lr_dir, '*.jpg'))
     global_prior_paths = fiFindByWildcard(os.path.join(global_prior_dir, '*.pt'))
     local_prior_paths = fiFindByWildcard(os.path.join(local_prior_dir, '*.pt'))
 
     device = torch.device('cuda:0')
-    state_dict = torch.load('weight_lolv1.pth')
+    state_dict = torch.load('weight_lolv1.pth', map_location=device)
 
     # Transformer based on diffusions
     # diffusion Transformer backbone, with GPP-LN and LPP-Attn inside
@@ -97,17 +98,25 @@ def main(inp_dir):
                                                             global_prior_paths,
                                                             local_prior_paths,
                                                             range(len(lr_paths))):
+        print(f"=== lr_path: {lr_path}")
+        print(f"=== global_path: {global_path}")
+        print(f"=== local_path: {local_path}")
+        # Clean up memory from previous loop
+        torch.cuda.empty_cache()
+
+
         # y = t(imread(lr_path)).to(device)
         img = to_tensor(cv2.cvtColor(cv2.imread(lr_path), cv2.COLOR_BGR2RGB)).unsqueeze(0)
-        # print(y.shape)
+        print(f"=== img: {img.shape}")
         global_prior = torch.load(global_path, map_location="cuda:0").to(device)
         local_prior = torch.load(local_path, map_location="cuda:0").to(device)
         print(f"=== local_prior: {local_prior.shape}")
 
         b, c, h, w = img.shape
         # use less memo and run faster without calculating gradients
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16):
             y, enc_feat = cond_lq(img.to(device), True)
+            print(f"=== y: {y.shape}")
             latent_size_h = h // 4
             latent_size_w = w // 4
             z = torch.randn(1, 3, latent_size_h, latent_size_w, device=device)
@@ -120,9 +129,7 @@ def main(inp_dir):
                 model.forward, z.shape, z, clip_denoised=False,
                 model_kwargs=model_kwargs, progress=False, device=device
             )
-
             dec_feat = vae.decode(samples, mid_feat=True)
-
             sr = second_decoder(samples, dec_feat, enc_feat)
 
         save_img_path = os.path.join(out_dir, os.path.basename(lr_path))
@@ -132,6 +139,7 @@ def main(inp_dir):
 if __name__ == "__main__":
     # update the input dir, which at least contains
     # such sub-folder: low, global_score, local_prior
-    input_dir = 'dataset/LOLv2_syn/Test'
+    # input_dir = 'dataset/LOLv2_syn/Test'
+    input_dir = 'benchmark-BO/dataset/DICM'
 
     main(input_dir)

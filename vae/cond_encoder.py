@@ -5,6 +5,10 @@ from vae.util_vae import DiagonalGaussianDistribution
 
 
 class CondEncoder(pl.LightningModule):
+    """
+    A conditional encoder is simply an encoder whose output
+    is used as a condition for another model
+    """
     def __init__(self,
                  double_z=True,
                  z_channels=3,
@@ -29,6 +33,17 @@ class CondEncoder(pl.LightningModule):
         self.quant_conv = torch.nn.Conv2d(2 * z_channels, 2 * embed_dim, 1)
 
     def forward(self, x, mid_feat=False):
+        """
+        A VAE-like encoder gives diffusion models the smooth, compressed,
+        probabilistic latent space they need to work correctly; a ResNet
+        encoder produces brittle, noisy, non-probabilistic features that
+        break diffusion stability and generalization.
+
+        A VAE encoder denoises because its probabilistic, low-capacity latent space
+        cannot encode random high-frequency noise, so noise is automatically
+        discarded while only the structured parts of the image are preserved.
+
+        """
         if mid_feat:
             h, enc_feat = self.encoder(x, mid_feat=True)
         else:

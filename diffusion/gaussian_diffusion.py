@@ -327,7 +327,7 @@ class GaussianDiffusion:
         B, C = x.shape[:2]
         assert t.shape == (B,)
         # print(f"=== x in p_mean_variance: {x.shape}")
-        model_output = model(x, t, **model_kwargs)
+        model_output = model(x, t, **model_kwargs) # noise from DiT
         if isinstance(model_output, tuple):
             model_output, extra = model_output
         else:
@@ -371,6 +371,7 @@ class GaussianDiffusion:
             return x
 
         if self.model_mean_type == ModelMeanType.START_X:
+            # predict the x0
             pred_xstart = process_xstart(model_output)
         else:
             pred_xstart = process_xstart(
@@ -591,6 +592,11 @@ class GaussianDiffusion:
         """
         Sample x_{t-1} from the model using DDIM. Eq. (12)
         Same usage as p_sample().
+
+        Solve the ODE
+        In the function ddim_sample(), there is no explicit variable named slope.
+        Instead, the code skips calculating the slope and directly calculates
+        the result of the integration step. If the standard Euler method is:
         """
         out = self.p_mean_variance(
             model,
@@ -640,6 +646,17 @@ class GaussianDiffusion:
     ):
         """
         Sample x_{t+1} from the model using DDIM reverse ODE.
+
+        You can take a real photo, encode it into noise x_T using ddim_reverse_sample,
+        and then decode it back using ddim_sample.
+
+        Use case: This is used for real image editing. You invert a real photo to find its
+        "noise signature, " edit the text prompt (if using conditional diffusion),
+        and re-generate.
+
+        DDIM Reverse Sample: This is a learned inversion. It uses the trained neural
+        network to calculate exactly what noise "should" be added to move the image
+        along a deterministic trajectory.
         """
         assert eta == 0.0, "Reverse ODE only for deterministic path"
         out = self.p_mean_variance(
@@ -747,12 +764,126 @@ class GaussianDiffusion:
                 yield out
                 img = out["sample"]
 
+    def ddim_fast_sample_loop(
+            self,
+            model,
+            shape,
+            steps=50,  # The target number of steps (e.g., 50)
+            noise=None,
+            clip_denoised=True,
+            denoised_fn=None,
+            cond_fn=None,
+            model_kwargs=None,
+            device=None,
+            progress=False,
+            eta=0.0,
+    ):
+        """
+        Generate samples using DDIM with fewer steps (strided sampling).
+        This allows for much faster generation (e.g., 20x speedup).
+        """
+        if device is None:
+            device = next(model.parameters()).device
+        assert isinstance(shape, (tuple, list))
+
+        if noise is not None:
+            img = noise
+        else:
+            img = th.randn(*shape, device=device)
+
+        # 1. Create the strided timeline
+        # e.g., if total=1000, steps=50, we get indices [0, 20, 40, ... 980]
+        # We perform the loop backward: 980 -> 960 -> ...
+        skip = self.num_timesteps // steps
+        seq = range(0, self.num_timesteps, skip)
+        seq = list(seq)[::-1]  # Reverse to go from T to 0
+
+        # Add the final implied step -1 (pure x0) for calculation purposes
+        seq_next = seq[1:] + [-1]
+
+        if progress:
+            from tqdm.auto import tqdm
+            seq_iter = tqdm(zip(seq, seq_next), total=len(seq))
+        else:
+            seq_iter = zip(seq, seq_next)
+
+        for i, j in seq_iter:
+            # i = current step (e.g., 980)
+            # j = next step to target (e.g., 960)
+
+            t = th.tensor([i] * shape[0], device=device)
+
+            # We must calculate the new 'alpha_prev' manually
+            # because the class property is hardcoded for 1-step diffusion.
+            with th.no_grad():
+                out = self.p_mean_variance(
+                    model,
+                    img,
+                    t,
+                    clip_denoised=clip_denoised,
+                    denoised_fn=denoised_fn,
+                    model_kwargs=model_kwargs,
+                )
+
+                # Apply Classifier Guidance if needed
+                if cond_fn is not None:
+                    out = self.condition_score(cond_fn, out, img, t, model_kwargs=model_kwargs)
+
+                # 1. Get current alpha_bar (at step i)
+                # We can use the standard helper because i is a valid index
+                alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, img.shape)
+
+                # 2. Get target alpha_bar (at step j) manually
+                if j < 0:
+                    # If the next step is -1, that means we are fully denoised.
+                    # alpha_cumprod for "time -1" is conceptually 1.0 (all signal, no noise)
+                    alpha_bar_prev = th.tensor(1.0, device=device)
+                else:
+                    # Extract the alpha for the jump target
+                    alpha_bar_prev = th.tensor(self.alphas_cumprod[j], device=device)
+
+                # Broadcast alpha_bar_prev to shape
+                while len(alpha_bar_prev.shape) < len(img.shape):
+                    alpha_bar_prev = alpha_bar_prev[..., None]
+
+                # 3. Re-derive epsilon (noise) from the model output
+                # (This is standard DDIM logic)
+                pred_xstart = out["pred_xstart"]
+                eps = (img - alpha_bar.sqrt() * pred_xstart) / (1 - alpha_bar).sqrt()
+
+                # 4. Calculate DDIM sigma (variance)
+                # Note: We use the manual alpha_bar_prev here
+                sigma = (
+                        eta
+                        * th.sqrt((1 - alpha_bar_prev) / (1 - alpha_bar))
+                        * th.sqrt(1 - alpha_bar / alpha_bar_prev)
+                )
+
+                # 5. DDIM Update Direction (Equation 12)
+                # "direction pointing to x_t"
+                pred_dir_xt = th.sqrt(1 - alpha_bar_prev - sigma ** 2) * eps
+
+                # "random noise" (only if eta > 0)
+                noise = th.randn_like(img)
+                if j < 0:
+                    # No noise at the very final step
+                    noise = 0
+
+                # 6. Step forward
+                img = (
+                        th.sqrt(alpha_bar_prev) * pred_xstart
+                        + pred_dir_xt
+                        + sigma * noise
+                )
+
+        return img
+
     def _vb_terms_bpd(
             self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
     ):
         """
         IDDPM, eq. (4-7)
-        Cal the loss, vb is variational bound,bpd is "bit per dim"
+        Cal the loss, vb is variational bound, bpd is "bit per dim"
         Get a term for the variational lower-bound.
         The resulting units are bits (rather than nats, as one might expect).
         This allows for comparison to other papers.
@@ -761,16 +892,17 @@ class GaussianDiffusion:
                  - 'pred_xstart': the x_0 predictions.
         """
         # use true x[0], x[t] and t to cal mean and var of x[t-1]
+        # the forward posterior
         true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(
             x_start=x_start, x_t=x_t, t=t
         )
 
-        # use x[t],t and predicted x[0] to get mean and var of x[t-1]
+        # use x[t], t and predicted x[0] to get mean and var of x[t-1]
         out = self.p_mean_variance(
             model, x_t, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
         )
 
-        # KL between p+theta and q
+        # KL between p_theta and q
         # L[t-1]
         kl = normal_kl(
             true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
@@ -805,6 +937,7 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
+        # forward process
         x_t = self.q_sample(x_start, t, noise=noise)
 
         terms = {}
@@ -821,6 +954,17 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps # weighted KL via IDDPM
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
+            """
+                1. Variance-head (model_var_values) still gets gradients from the VB objective 
+                2. Mean-head (model_output) does not get gradients from the VB objective
+                3. The mean-head is instead trained primarily by the usual “simple” loss (e.g., MSE on ε̂, x₀, or v), which is typically more stable / better behaved.
+            Why do this?
+                1. The VB/KL term can be noisy and can “fight” the mean objective.
+                2. Empirically (and in common reference implementations), it’s beneficial to:
+                    train mean with the simple loss,
+                    train variance with the VB loss,
+                    but decouple their gradients.
+            """
             model_output = model(x_t, t, **model_kwargs)
 
             if self.model_var_type in [
@@ -833,8 +977,14 @@ class GaussianDiffusion:
                 # Learn the variance using the variational bound, but don't let
                 # it affect our mean prediction.
                 frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
+                """
+                Inside _vb_terms_bpd, the “model” is a dummy function that always returns frozen_out, ensuring:
+                    VB loss trains only the variance
+                    Mean prediction is trained only by the main loss
+                    No accidental gradient leakage
+                """
                 terms["vb"] = self._vb_terms_bpd(
-                    model=lambda *args, r=frozen_out: r,
+                    model=lambda *args, r=frozen_out: r, # "fake model"
                     x_start=x_start,
                     x_t=x_t,
                     t=t,

@@ -69,10 +69,6 @@ class OverlapPatchEmbed(nn.Module):
         return x
 
 
-def modulate(x, shift, scale):
-    return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
-
-
 #################################################################################
 #               Embedding Layers for Timesteps and Class Labels                 #
 #################################################################################
@@ -278,7 +274,11 @@ class Cross_attention(nn.Module):
         self.num_heads = num_heads
         self.temperature = nn.Parameter(torch.ones(num_heads, 1, 1))
 
+        #The 1×1 Conv learns K and V from the local features, and the 3×3
+        # depthwise Conv adds local spatial structure so that
+        # channel-attention has neighborhood awareness
         self.kv = nn.Conv2d(dim, dim * 2, kernel_size=1, bias=bias)
+        # depthwise conv, add spatial info
         self.kv_dwconv = nn.Conv2d(dim * 2, dim * 2, kernel_size=3, stride=1, padding=1, groups=dim * 2, bias=bias)
 
         self.q = nn.Conv2d(dim, dim, kernel_size=1, bias=bias)
@@ -288,23 +288,37 @@ class Cross_attention(nn.Module):
 
     def forward(self, x, q_map):
         b, c, h, w = x.shape
+        # print(f"=== b, c, h, w: {b, c, h, w}")
         # q_map from VLMs
         kv = self.kv_dwconv(self.kv(q_map))
+        # print(f"=== kv: {kv.shape}")
         k, v = kv.chunk(2, dim=1)
+        # print(f"=== k: {k.shape}")
+        # print(f"=== v: {v.shape}")
+        # [1, 256, 100, 150] -> [1, 8, 32, 15000], num heads is 8
         k = rearrange(k, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
         v = rearrange(v, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
+        # print(f"=== k: {k.shape}")
+        # print(f"=== v: {v.shape}")
 
         q = self.q_dwconv(self.q(x))
         q = rearrange(q, 'b (head c) h w -> b head c (h w)', head=self.num_heads)
-
         q = torch.nn.functional.normalize(q, dim=-1)
         k = torch.nn.functional.normalize(k, dim=-1)
 
         attn = (q @ k.transpose(-2, -1)) * self.temperature
         attn = attn.softmax(dim=-1)
 
+        # weighted sum of all the channels of each pixel
+        # for each head, each channel is replaced by a weighted sum of all channels
+        """
+        It does not mix spatial positions (no spatial attention) 
+        It does mix channels per head at each position based on spatial similarity patterns.
+        Channel-attention lets the model adjust how each pixel uses different feature channels 
+        (texture, illumination, contrast, sharpness) without mixing spatial locations, 
+        making it ideal for low-light enhancement.
+        """
         out = (attn @ v)
-
         out = rearrange(out, 'b head c (h w) -> b (head c) h w', head=self.num_heads, h=h, w=w)
 
         out = self.project_out(out)
@@ -345,6 +359,13 @@ class TransformerBlock(nn.Module):
         # print(f"=== q_map conv: {q_map.shape}")
         q_map = self.map_norm(q_map)
         # print(f"=== q_map norm: {q_map.shape}")
+        # gate: DiT uses this to turn on/off parts of the block depending on timestep.
+        """
+        y = x + gate_msa * MSA( modulated_LN(x) )
+        y = y + gate_mlp * MLP( modulated_LN(y) )
+        gate only makes sense when you have a residual connection:
+        out=x+gate⋅F(x)
+        """
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
         dim = x.shape[1]
         # print(f"=== x 1: {x.shape}")
@@ -353,7 +374,7 @@ class TransformerBlock(nn.Module):
         # print(f"=== x 2: {x.shape}")
         x_ = self.swarp(x)
 
-        x_ = modulate(self.norm1(x_), shift_msa, scale_msa)
+        x_ = modulate(self.norm1(x_), shift_msa, scale_msa) #GPP-LN: modulate
         x = x + gate_msa.unsqueeze(-1).unsqueeze(-1) * self.attn(x_)
         # print(f"=== x 3: {x.shape}")
 
