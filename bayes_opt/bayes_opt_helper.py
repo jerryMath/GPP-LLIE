@@ -1,18 +1,22 @@
 import torch
 import torch.backends.cudnn as cudnn
 from ax.service.ax_client import ObjectiveProperties
-
+import numpy as np
+import random
 from bayes_opt.constants import EPS, NIQE_MIN, NIQE_MAX, MUSIQ_MIN, MUSIQ_MAX
 from bayes_opt.utils import _to_float
 
 # Optimized settings
+seed = 0
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
-torch.manual_seed(0)
-torch.cuda.manual_seed_all(0)
-
+torch.use_deterministic_algorithms(True)
 
 class BayesOptimizationHelper:
     def __init__(self, device, global_prior, local_prior,
@@ -127,10 +131,10 @@ class BayesOptimizationHelper:
 
                 print(
                     f"    Trial {i + 1}: "
-                    f"G={params['global_scale']:.3f}, "
-                    f"L={params['local_scale']:.3f}, "
-                    f"Gamma={params['local_gamma']:.3f} "
-                    f"-> NIQE={niqe_val:.4f}, MUSIQ={musiq_val:.4f}, "
+                    f"G={params['global_scale']:}, "
+                    f"L={params['local_scale']}, "
+                    f"Gamma={params['local_gamma']} "
+                    f"-> NIQE={niqe_val}, MUSIQ={musiq_val}, "
                 )
             except Exception as e:
                 print(f"    Trial {i + 1} Failed: {e}, params={params}")
@@ -159,9 +163,9 @@ class BayesOptimizationHelper:
         best_row = df.loc[df["score"].idxmin()]
         print(
             f"[Best weighted params] trial={int(best_row['trial_index'])}, "
-            f"G={best_row['global_scale']:.3f}, L={best_row['local_scale']:.3f}, "
-            f"Gamma={best_row['local_gamma']:.3f} -> Score={best_row['score']:.6f}\n"
-            f"    NIQE={best_row['niqe']:.4f}, MUSIQ={best_row['musiq']:.4f}"
+            f"G={best_row['global_scale']}, L={best_row['local_scale']}, "
+            f"Gamma={best_row['local_gamma']} -> Score={best_row['score']}\n"
+            f"    NIQE={best_row['niqe']}, MUSIQ={best_row['musiq']}"
         )
 
         return best_row, df

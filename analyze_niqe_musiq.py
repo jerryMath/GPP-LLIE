@@ -82,6 +82,6 @@ if __name__ == "__main__":
     # input_path = "./benchmark-BO/dataset/DICM/outputs_bo_v1_weights_3/*_comparison.csv"
     # output_path = "./benchmark-BO/dataset/DICM/outputs_bo_v1_weights_3/combined_comparisons.csv"
 
-    input_path = "./dataset/LOLv1/test/outputs_bo_v2_weights_9/*_comparison.csv"
-    output_path = "./dataset/LOLv1/test/outputs_bo_v2_weights_9/combined_comparisons.csv"
+    input_path = "./dataset/DICM/outputs_bo_v2_weights_12/*_comparison.csv"
+    output_path = "./dataset/DICM/outputs_bo_v2_weights_12/combined_comparisons.csv"
     main(input_path, output_path)

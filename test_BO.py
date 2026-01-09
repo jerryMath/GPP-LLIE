@@ -1,24 +1,33 @@
 import torch
 import torch.backends.cudnn as cudnn
 import os
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 import cv2
 from torchvision.utils import save_image
 from torchvision.transforms import ToTensor
 import uuid
 import pandas as pd
+import numpy as np
+import random
 # --- NEW IMPORTS FOR BO ---
 from ax.service.ax_client import AxClient
 import pyiqa  # Library for Image Quality Assessment
 
 from bayes_opt.bayes_opt_helper import BayesOptimizationHelper
 from bayes_opt.gppllie_helper import GPPLLIEHelper
-from bayes_opt.utils import fiFindByWildcard, _to_float, plot_bo_trials
+from bayes_opt.utils import fiFindByWildcard, plot_bo_trials
 
 # Optimized settings
+seed = 0
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
+torch.use_deterministic_algorithms(True)
 
 
 def main(inp_dir):
@@ -26,7 +35,7 @@ def main(inp_dir):
     lr_dir = os.path.join(inp_dir, 'low')
     global_prior_dir = os.path.join(inp_dir, 'global_score')
     local_prior_dir = os.path.join(inp_dir, 'local_prior')
-    out_dir = os.path.join(inp_dir, 'outputs_bo_v2_weights_9')
+    out_dir = os.path.join(inp_dir, 'outputs_bo_v2_weights_12_compare_env2')
     os.makedirs(out_dir, exist_ok=True)
 
     lr_paths = []
@@ -68,7 +77,7 @@ def main(inp_dir):
     # --- 3. Main Processing Loop ---
     i = 0
     for _key in common_keys:
-        if i == -1: exit()
+        if i == 3: exit()
 
         lr_path = lr_map[_key]
         global_path = g_map[_key]
@@ -88,8 +97,8 @@ def main(inp_dir):
                 raw_niqe = niqe_metric(img_tensor)
                 raw_musiq = musiq_metric(img_tensor)
             print(
-                f"=== Raw Metrics: "
-                f"=== raw niqe: {raw_niqe}; raw musiq: {raw_musiq}"
+                f"---> Raw Metrics: "
+                f"---> raw niqe: {raw_niqe}; raw musiq: {raw_musiq}"
             )
 
             global_prior_base = torch.load(global_path, map_location=device)
@@ -126,8 +135,8 @@ def main(inp_dir):
             sr_clamped = bo.generation_sr(baseline_params)
             wo_bo_niqe, wo_bo_musiq = bo.evaluate(sr_clamped)
             print(
-                f"=== Metrics after GPP-LLIE w/o BO: "
-                f"=== niqe: {wo_bo_niqe}; musiq: {wo_bo_musiq}"
+                f"---> Metrics after GPP-LLIE w/o BO: "
+                f"---> niqe: {wo_bo_niqe}; musiq: {wo_bo_musiq}"
             )
             bo.create_experiment_with_constraints(
                 searching_params=searching_params,
@@ -138,35 +147,19 @@ def main(inp_dir):
             baseline_trial_index = bo.add_baseline_trial(
                 wo_bo_niqe, wo_bo_musiq, baseline_params
             )
-            bo.run_n_trials(n_trials=15)
+            bo.run_n_trials(n_trials=20)
             best_row, df = bo.get_best_params()
+            final_niqe, final_musiq = best_row["niqe"], best_row["musiq"]
+            print(
+                f"---> Metrics after GPP-LLIE with BO: "
+                f"---> niqe: {final_niqe}; musiq: {final_musiq}"
+            )
 
             # Generate Final "With BO" Image
-            best_params = {
-                "global_scale": float(best_row["global_scale"]),
-                "local_scale": float(best_row["local_scale"]),
-                "local_gamma": float(best_row["local_gamma"]),
-            }
-            adjusted_global_prior, adjusted_local_prior = bo.apply_priors(best_params)
-
-            sr_final = gppllie.get_denoised_and_decoded_img(
-                global_prior=adjusted_global_prior,
-                local_prior=adjusted_local_prior
-            )
-            save_img_path_bo = os.path.join(out_dir, f"BO_{filename}")
-            sr_final_clamped = torch.clamp(sr_final, 0, 1)
-            save_image(sr_final_clamped, save_img_path_bo)
-            print(f"=== Saved to {save_img_path_bo}")
-
-            # Calculate final metrics for BO image
-            with torch.no_grad():
-                final_niqe = _to_float(niqe_metric(sr_final_clamped))
-                final_musiq = _to_float(musiq_metric(sr_final_clamped))
-
-            print(
-                f"=== Final BO Metrics: "
-                f"=== NIQE={final_niqe:.4f}, MUSIQ={final_musiq:.4f}"
-            )
+            sr_final_clamped = bo.generation_sr(best_row)
+            bo_img_path = os.path.join(out_dir, f"BO_{filename}")
+            save_image(sr_final_clamped, bo_img_path)
+            print(f"=== Saved to {bo_img_path}")
 
             # Save Logs & Visualize
             df.to_csv(os.path.join(out_dir, f"{exp_name}.csv"), index=False)
@@ -183,9 +176,7 @@ def main(inp_dir):
                 "best_trial_index": int(best_row["trial_index"]),
                 "best_global_scale": float(best_row["global_scale"]),
                 "best_local_scale": float(best_row["local_scale"]),
-                "best_local_gamma": float(best_row["local_gamma"]),
-                "best_niqe": float(best_row["niqe"]),
-                "best_musiq": float(best_row["musiq"]),
+                "best_local_gamma": float(best_row["local_gamma"])
             }
             pd.DataFrame([summary]).to_csv(os.path.join(out_dir, f"{exp_name}_summary.csv"), index=False)
 
@@ -195,6 +186,7 @@ def main(inp_dir):
                 "without_bo_niqe": float(wo_bo_niqe),
                 "with_bo_niqe": float(final_niqe),
                 "niqe_improvement": float(wo_bo_niqe - final_niqe),
+                "raw_musiq": float(raw_musiq.item()),
                 "without_bo_musiq": float(wo_bo_musiq),
                 "with_bo_musiq": float(final_musiq),
                 "musiq_improvement": float(final_musiq - wo_bo_musiq)
@@ -209,7 +201,7 @@ def main(inp_dir):
         finally:
             # runs whether success or failure
             for name in ["img_tensor", "global_prior_base", "local_prior_base",
-                         "sr_raw", "sr_raw_clamped", "sr_final", "sr_final_clamped",
+                         "sr_raw", "sr_raw_clamped", "sr_final_clamped",
                          "ax_client", "bo", "df", "best_row"]:
                 if name in locals():
                     del locals()[name]
@@ -221,6 +213,5 @@ def main(inp_dir):
 
 
 if __name__ == "__main__":
-    # input_dir = 'benchmark-BO/dataset/DICM'
-    input_dir = 'dataset/LOLv1/test'
+    input_dir = 'dataset/DICM'
     main(input_dir)

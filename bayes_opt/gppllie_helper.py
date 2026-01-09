@@ -1,19 +1,24 @@
 import torch
 import torch.backends.cudnn as cudnn
+import numpy as np
+import random
 from model_incontext_revise import DiT_incontext_revise
 from diffusion import create_diffusion
 from vae.autoencoder import AutoencoderKL
 from vae.cond_encoder import CondEncoder
 from vae.encoder_decoder import Decoder2
 
+# Optimized settings
+seed = 0
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
+torch.cuda.manual_seed_all(seed)
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
-
-torch.manual_seed(0)
-torch.cuda.manual_seed_all(0)
-
+torch.use_deterministic_algorithms(True)
 
 class GPPLLIEHelper:
     def __init__(self, model_path, device):
@@ -71,18 +76,19 @@ class GPPLLIEHelper:
         self._invariant_ready = True
 
     def get_denoised_and_decoded_img(self, global_prior, local_prior):
-        print("=== Getting denoised and decoded image...")
+        print("=== Getting denoised and decoded image via DDIM...")
         self._check_invariant_ready()
         with torch.no_grad():
             model_kwargs = dict(y=self.y, vis=global_prior, q_map=local_prior)
-            samples = self.diffusion_val.p_sample_loop(
+            samples = self.diffusion_val.ddim_sample_loop(
                 self.model.forward,
                 self.z_fixed.shape,
                 self.z_fixed,
                 clip_denoised=False,
                 model_kwargs=model_kwargs,
                 progress=False,
-                device=self._device
+                device=self._device,
+                eta=0.0,  # 0.0 = deterministic DDIM
             )
             dec_feat = self.vae.decode(samples, mid_feat=True)
             sr_final = self.second_decoder(samples, dec_feat, self.enc_feat)
