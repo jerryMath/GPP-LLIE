@@ -74,7 +74,7 @@ def main(inp_dir):
     i = 0
     for _key in common_keys:
         save_path = os.path.join(out_dir, _key + ".pt")
-        if i == 1: exit()
+        if i == -1: exit()
 
         lr_path = lr_map[_key]
         global_path = g_map[_key]
@@ -114,5 +114,14 @@ def main(inp_dir):
 
 
 if __name__ == "__main__":
-    input_dir = 'dataset/NPE'
-    main(input_dir)
+    input_dirs = [
+        'dataset/DICM',
+        'dataset/LIME', 
+        'dataset/MEF', 
+        'dataset/NPE',
+        'dataset/LOLv1/test', 
+        'dataset/LOLv2_syn/test'
+    ]
+
+    for input_dir in input_dirs:
+        main(input_dir)

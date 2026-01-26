@@ -12,7 +12,7 @@ import random
 # --- NEW IMPORTS FOR BO ---
 from ax.service.ax_client import AxClient
 import pyiqa  # Library for Image Quality Assessment
-
+import torch.nn.functional as F
 from bayes_opt.bayes_opt_helper import BayesOptimizationHelper
 from bayes_opt.gppllie_helper import GPPLLIEHelper
 from bayes_opt.utils import fiFindByWildcard, plot_bo_trials
@@ -30,12 +30,23 @@ torch.backends.cudnn.deterministic = True
 torch.use_deterministic_algorithms(True)
 
 
+def pad_to_multiple(x, multiple=8, mode="reflect"):
+    # x: (B,C,H,W)
+    B, C, H, W = x.shape
+    pad_h = (multiple - H % multiple) % multiple
+    pad_w = (multiple - W % multiple) % multiple
+    if pad_h == 0 and pad_w == 0:
+        return x
+    # pad format: (left, right, top, bottom)
+    return F.pad(x, (0, pad_w, 0, pad_h), mode=mode)
+
+
 def main(inp_dir):
     # --- 1. Directory Setup ---
     lr_dir = os.path.join(inp_dir, 'low')
     global_prior_dir = os.path.join(inp_dir, 'global_score')
     local_prior_dir = os.path.join(inp_dir, 'local_prior')
-    out_dir = os.path.join(inp_dir, 'outputs_bo_v2_weights_12_compare_env2')
+    out_dir = os.path.join(inp_dir, 'outputs_bo_v2_weights_ddim_1_100trials')
     os.makedirs(out_dir, exist_ok=True)
 
     lr_paths = []
@@ -77,7 +88,7 @@ def main(inp_dir):
     # --- 3. Main Processing Loop ---
     i = 0
     for _key in common_keys:
-        if i == 3: exit()
+        if i == -1: exit()
 
         lr_path = lr_map[_key]
         global_path = g_map[_key]
@@ -92,6 +103,9 @@ def main(inp_dir):
         try:
             img_rgb = cv2.cvtColor(cv2.imread(lr_path), cv2.COLOR_BGR2RGB)
             img_tensor = to_tensor(img_rgb).unsqueeze(0).to(device)
+            img_tensor = pad_to_multiple(img_tensor, 8)
+            print(f"=== img_tensor: {img_tensor.shape}")
+
             # raw metrics (low light imgs)
             with torch.no_grad():
                 raw_niqe = niqe_metric(img_tensor)
@@ -103,11 +117,23 @@ def main(inp_dir):
 
             global_prior_base = torch.load(global_path, map_location=device)
             local_prior_base = torch.load(local_path, map_location=device)
+            local_prior_base = pad_to_multiple(local_prior_base, 8)
+            
+            print(f"=== img_tensor: {img_tensor.shape}")
+            print(f"=== global_prior_base: {global_prior_base}")
+            print(f"=== local_prior_base: {local_prior_base.shape}")
+
+
             gppllie.get_invariant_features(img_tensor)
+            print(f"=== gppllie.y: {gppllie.y.shape}")
+
+            exit()
             sr_raw = gppllie.get_denoised_and_decoded_img(
                 global_prior=global_prior_base,
                 local_prior=local_prior_base
             )
+
+            print(f"=== img_tensor: {img_tensor.shape}")
             sr_raw_clamped = torch.clamp(sr_raw, 0, 1)
             save_img_path = os.path.join(out_dir, f"WO_BO_{filename}")
             save_image(sr_raw_clamped, save_img_path)
@@ -147,7 +173,7 @@ def main(inp_dir):
             baseline_trial_index = bo.add_baseline_trial(
                 wo_bo_niqe, wo_bo_musiq, baseline_params
             )
-            bo.run_n_trials(n_trials=20)
+            bo.run_n_trials(n_trials=100)
             best_row, df = bo.get_best_params()
             final_niqe, final_musiq = best_row["niqe"], best_row["musiq"]
             print(
@@ -213,5 +239,15 @@ def main(inp_dir):
 
 
 if __name__ == "__main__":
-    input_dir = 'dataset/DICM'
-    main(input_dir)
+
+    input_dirs = [
+        # 'dataset/DICM', # done
+        # 'dataset/LIME', # done
+        # 'dataset/MEF', # done
+        # 'dataset/NPE', # done
+        # 'dataset/LOLv1/test', # done
+        'dataset/LOLv2_syn/test'
+    ]
+
+    for input_dir in input_dirs:
+        main(input_dir)

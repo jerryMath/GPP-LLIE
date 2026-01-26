@@ -330,8 +330,8 @@ class Decoder2(nn.Module):
         self.warp.append(WarpBlock(128))
 
         self.mix = nn.ModuleList()
-        self.mix.append(Mix(m=-1.0))
-        self.mix.append(Mix(m=-0.6))
+        self.mix.append(Mix(m=-1.0)) # todo: BO; RL + Optimization (KL)
+        self.mix.append(Mix(m=-0.6)) # todo: BO
 
     def forward(self, z, code_decoder_output, enc_feat):
         # assert z.shape[1:] == self.z_shape[1:]

@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""
-Combine 01–10.JPG_comparison.csv and compute average NIQE/MUSIQ improvements.
-
-Expected columns (from your CSVs):
-- niqe_improvement
-- musiq_improvement
-Optionally:
-- without_bo_niqe, with_bo_niqe, without_bo_musiq, with_bo_musiq
-"""
-
 from __future__ import annotations
 
 import glob
@@ -39,22 +28,17 @@ def load_all_csvs(pattern: str = "/mnt/data/*JPG_comparison.csv") -> pd.DataFram
     return all_df
 
 
-def mean_std(series: pd.Series) -> Tuple[float, float, int]:
-    s = pd.to_numeric(series, errors="coerce").dropna()
-    return float(s.mean()), float(s.std(ddof=1)), int(s.shape[0])
-
-
-def main(input_path, output_path):
+def main(input_path, output_path, save_output):
     all_df = load_all_csvs(input_path)
-    print(f"=== all_df: \n{all_df}")
+    # print(f"=== all_df: \n{all_df.head(2)}")
 
     # Keep only rows where NIQE is improved by BO
     # (strictly lower NIQE after BO)
     good = all_df[all_df["with_bo_niqe"] < all_df["without_bo_niqe"]].copy()
-    print(f"{len(good)} NIQE-improved samples found.")
+    print(f"---> {len(good)}/{len(all_df)} NIQE-improved samples found for {input_path}")
 
     if len(good) == 0:
-        print("No NIQE-improved samples found. Nothing to average.")
+        print("---> No NIQE-improved samples found. Nothing to average !!!")
         return
 
     # Averages on filtered subset
@@ -64,24 +48,34 @@ def main(input_path, output_path):
     avg_musiq_imp = good["musiq_improvement"].mean()
     std_musiq_imp = good["musiq_improvement"].std()
 
-    print("\n=== Averages over NIQE-improved subset only ===")
-    print(f"Avg NIQE improvement (mean ± std):  {avg_niqe_imp:.6f} ± {std_niqe_imp:.6f}")
-    print(f"Avg MUSIQ improvement (mean ± std): {avg_musiq_imp:.6f} ± {std_musiq_imp:.6f}")
+    print(f"   Averages over NIQE-improved subset only")
+    print(f"   Avg NIQE improvement (mean ± std):  {avg_niqe_imp:.6f} ± {std_niqe_imp:.6f}")
+    print(f"   Avg MUSIQ improvement (mean ± std): {avg_musiq_imp:.6f} ± {std_musiq_imp:.6f}")
 
     all_df['avg_niqe_imp'] = avg_niqe_imp
     all_df['std_niqe_imp'] = std_niqe_imp
     all_df['avg_musiq_imp'] = avg_musiq_imp
     all_df['std_musiq_imp'] = std_musiq_imp
 
-    # --- Optional: save combined file ---
-    all_df.to_csv(output_path, index=False)
-    print(f"\nSaved combined CSV to: {output_path}")
+    if save_output:
+        # --- Optional: save combined file ---
+        all_df.to_csv(output_path, index=False)
+        print(f"Saved combined CSV to: {output_path}")
 
 
 if __name__ == "__main__":
-    # input_path = "./benchmark-BO/dataset/DICM/outputs_bo_v1_weights_3/*_comparison.csv"
-    # output_path = "./benchmark-BO/dataset/DICM/outputs_bo_v1_weights_3/combined_comparisons.csv"
+    input_dirs = [
+        'dataset/DICM', 
+        'dataset/LIME', 
+        'dataset/MEF', 
+        'dataset/NPE', 
+        'dataset/LOLv1/test',
+        'dataset/LOLv2_syn/test'
+    ]
+    exp_name = "outputs_bo_v2_weights_ddim_1_100trials"
+    save_output = False
 
-    input_path = "./dataset/DICM/outputs_bo_v2_weights_12/*_comparison.csv"
-    output_path = "./dataset/DICM/outputs_bo_v2_weights_12/combined_comparisons.csv"
-    main(input_path, output_path)
+    for input in input_dirs:
+        input_path = os.path.join(input, exp_name, "*_comparison.csv")
+        output_path = os.path.join(input, exp_name, "combined_comparisons.csv")
+        main(input_path, output_path, save_output)
