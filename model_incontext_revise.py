@@ -354,11 +354,10 @@ class TransformerBlock(nn.Module):
         self.cross_attn = Cross_attention(dim * 2, num_heads, bias)
 
     def forward(self, x, y, q_map, t):
-        # print(f"=== q_map raw: {q_map.shape}")
-        q_map = self.map_conv(q_map)
-        # print(f"=== q_map conv: {q_map.shape}")
-        q_map = self.map_norm(q_map)
-        # print(f"=== q_map norm: {q_map.shape}")
+
+        # q_map = self.map_conv(q_map)
+        # q_map = self.map_norm(q_map)
+
         # gate: DiT uses this to turn on/off parts of the block depending on timestep.
         """
         y = x + gate_msa * MSA( modulated_LN(x) )
@@ -379,7 +378,7 @@ class TransformerBlock(nn.Module):
         # print(f"=== x 3: {x.shape}")
 
         # 做cross_attention
-        x = x + self.cross_attn(self.cross_norm(x), q_map)
+        # x = x + self.cross_attn(self.cross_norm(x), q_map)
         # print(f"=== x 4: {x.shape}")
 
         x = x + gate_mlp.unsqueeze(-1).unsqueeze(-1) * self.ffn(modulate(self.norm2(x), shift_mlp, scale_mlp))
@@ -461,7 +460,8 @@ class DiT_incontext_revise(nn.Module):
         # print(f"===x embedded: {x.shape}")
         y = self.y_embedder(y)
         t = self.t_embedder(t)
-        t = t + torch.unsqueeze(vis, dim=-1).to(torch.float32)
+        # remove local and global priors
+        # t = t + torch.unsqueeze(vis, dim=-1).to(torch.float32)
 
         for j, block in enumerate(self.blocks):
             x = block(x, y, q_map, t)
