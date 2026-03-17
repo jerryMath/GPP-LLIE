@@ -127,7 +127,6 @@ def main(inp_dir):
             gppllie.get_invariant_features(img_tensor)
             print(f"=== gppllie.y: {gppllie.y.shape}")
 
-            exit()
             sr_raw = gppllie.get_denoised_and_decoded_img(
                 global_prior=global_prior_base,
                 local_prior=local_prior_base

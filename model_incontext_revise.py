@@ -353,7 +353,7 @@ class TransformerBlock(nn.Module):
         self.cross_norm = LayerNorm(dim * 2, LayerNorm_type)
         self.cross_attn = Cross_attention(dim * 2, num_heads, bias)
 
-    def forward(self, x, y, q_map, t):
+    def forward(self, x, y, t):
 
         # q_map = self.map_conv(q_map)
         # q_map = self.map_norm(q_map)
@@ -448,7 +448,8 @@ class DiT_incontext_revise(nn.Module):
         ])
         self.final_layer = FinalLayer(embed_dim, self.out_channels, LayerNorm_type)
 
-    def forward(self, x, t, y, vis, q_map):
+    # def forward(self, x, t, y, vis, q_map):
+    def forward(self, x, t, y):
         """
         Forward pass of DiT.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -464,7 +465,7 @@ class DiT_incontext_revise(nn.Module):
         # t = t + torch.unsqueeze(vis, dim=-1).to(torch.float32)
 
         for j, block in enumerate(self.blocks):
-            x = block(x, y, q_map, t)
+            x = block(x, y, t)
 
         x = self.final_layer(x, t)
 
