@@ -5,22 +5,13 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.nn.parallel import DataParallel
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
-from torchvision.datasets import ImageFolder
-from torchvision import transforms
 import numpy as np
 from collections import OrderedDict
 from PIL import Image
-from copy import deepcopy
-from glob import glob
 from time import time
 import argparse
 import logging
 import os
-import math
 from model_incontext_revise import DiT_incontext_revise
 from diffusion import create_diffusion
 from vae.autoencoder import AutoencoderKL
@@ -31,9 +22,6 @@ from LoL_dataset import LoL_Dataset_RIDCP, create_dataloader
 from utils import util
 from torchvision.utils import save_image
 from download import load_model
-
-from torch.nn import functional as F
-
 from losses import l1_loss, PerceptualNetwork
 from pytorch_msssim import msssim
 
@@ -121,39 +109,39 @@ def main(args):
         logger = logging.getLogger('base')
         logger.info(option.dict2str(opt))
 
-    
     model = DiT_incontext_revise()
-    ckpt_path = ' ' # your saved weight
+    ckpt_path = './experiments/GPP_LLIE_LOLv1_dit/models/1/1.pth' # your saved weight
     state_dict = load_model(ckpt_path)
     try:
         model.load_state_dict(state_dict, strict=True)
         print('loading pre-trained model')
-    except:
-        print('error')
+    except Exception as e:
+        print('loading pre-trained model failed:', e)
+        raise
     model = model.to(device)
 
-
     cond_lq = CondEncoder()
-    ckpt_condencoder = ' ' # your saved weight
+    ckpt_condencoder = './experiments/GPP_LLIE_LOLv1_dit/models/1/1_condencoder.pth' # your saved weight
     state_dict = load_model(ckpt_condencoder)
     try:
         cond_lq.load_state_dict(state_dict, strict=True)
         print('loading pretrained cond_encoder')
-    except:
-        print('error')
+    except Exception as e:
+        print('loading pretrained cond_encoder failed,', e)
+        raise
     cond_lq = cond_lq.to(device)
 
     vae = AutoencoderKL()
     try:
-        vae.load_state_dict(torch.load('weight_lol.pth')['vae'], strict=True)
+        vae.load_state_dict(torch.load('./weight_lolv1.pth')['vae'], strict=True)
         print('loading pretrained vae')
-    except:
-        print('error')
+    except Exception as e:
+        print('loading pretrained vae failed,', e)
+        raise
     vae = vae.to(device)
 
     second_decoder = Decoder2()
     second_decoder = second_decoder.to(device)
-
 
     parmas = list(second_decoder.parameters())
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper)
@@ -161,7 +149,6 @@ def main(args):
     scheduler_G = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[250, 350, 400, 450], gamma=0.5)
     
     dataset_cls = LoL_Dataset_RIDCP
-
     for phase, dataset_opt in opt['datasets'].items():
         if phase == 'train':
             train_set = dataset_cls(opt=dataset_opt, train=True)
@@ -171,7 +158,7 @@ def main(args):
         elif phase == 'val':
             val_set = dataset_cls(opt=dataset_opt, train=False)
             val_loader = create_dataloader(False, val_set, dataset_opt, opt, None)
-    
+
     print('complete trainloader')
     
     model.train()  # important! This enables embedding dropout for classifier-free guidance
@@ -284,7 +271,8 @@ def main(args):
 
                     # Sample images:
                     samples = diffusion_val.p_sample_loop(
-                        model.forward, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs, progress=True, device=device
+                        model.forward, z.shape, z, clip_denoised=False, model_kwargs=model_kwargs,
+                        progress=True, device=device
                         )
 
                     dec_feat = vae.decode(samples, mid_feat=True)
@@ -314,16 +302,15 @@ def main(args):
                 logger.info(f"Saved checkpoint to {save_path}")
 
     model.eval()  
-    logger.info("Stgae 3 Training Done!")
+    logger.info("Stage 3 Training Done!")
 
 
 if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument('--opt', type=str, help='Path to option YMAL file.',
-                            default='LOLv1_decoder2.yml')
+    parser.add_argument('--opt', type=str, help='Path to option YMAL file.', default='LOLv1_decoder2.yml')
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--epochs", type=int, default=500)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--global-batch-size", type=int, default=16)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training

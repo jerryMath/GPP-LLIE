@@ -1,0 +1,95 @@
+# -------------------------
+# Python
+# -------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyc
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+pip-wheel-metadata/
+
+# Cache / test
+*.log
+*.pot
+*.pyc
+*.tmp
+*.swp
+*.swo
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# -------------------------
+# PyTorch / ML
+# -------------------------
+*.ckpt
+*.pth
+*.pt
+*.onnx
+
+# Logs
+runs/
+events.out.tfevents.*
+lightning_logs/
+wandb/
+mlruns/
+
+# Data cache
+data/
+datasets/
+*.npz
+*.npy
+*.h5
+*.pkl
+
+# -------------------------
+# Jupyter
+# -------------------------
+.ipynb_checkpoints
+*.ipynb.json
+
+# -------------------------
+# IDEs / Editors
+# -------------------------
+.vscode/
+.idea/
+*.iml
+
+# -------------------------
+# OS-specific
+# -------------------------
+.DS_Store
+Thumbs.db
+
+# -------------------------
+# Others
+# -------------------------
+*.bak
+*.old
+*.orig
+
+# CUDA and system installers
+*.deb
+*.run
+
+# -------------------------
+# Custom project-specific
+# -------------------------
+dataset/
+experiments/
+defor_cuda_ext/
